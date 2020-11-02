@@ -1,0 +1,13 @@
+syntax = "proto3";
+package decnet;
+
+
+message packet {
+  string Action     = 1;
+  string Listener   = 2;
+  string Username   = 3;
+  string PublicKey  = 4;
+  string Headers    = 5;
+  bytes Body        = 8;
+  int64 created     = 9;
+}
