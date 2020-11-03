@@ -8,6 +8,7 @@ message packet {
   string Username   = 3;
   string PublicKey  = 4;
   string Headers    = 5;
-  bytes Body        = 8;
-  int64 created     = 9;
+  bool completed    = 6;
+  bytes Body        = 7;
+  int64 created     = 8;
 }

@@ -15,19 +15,16 @@ type Context struct {
 	tcpConnection  net.Conn
 }
 
-func newContext() *Context {
-	c := &Context{
-		requestBuffer:  make([]byte, 2048),
-		responseBuffer: make([]byte, 2048),
-	}
+func (c *Connection) newContext() *Context {
+	ctx := &Context{}
 
-	c.request = bufio.NewBuffer(c.requestBuffer)
-	c.response = bufio.NewBuffer(c.responseBuffer)
+	ctx.request = bufio.NewBuffer(ctx.requestBuffer)
+	ctx.response = bufio.NewBuffer(ctx.responseBuffer)
 
-	return c
+	return ctx
 }
 
-func (c *Context) Replay(message string) error {
-	_, err := c.response.Write([]byte(message))
+func (ctx *Context) Replay(message string) error {
+	_, err := ctx.response.Write([]byte(message))
 	return err
 }

@@ -68,14 +68,12 @@ func (c *Connection) handler(conn net.Conn) {
 	defer conn.Close()
 
 	var (
-		buf     = make([]byte, 8000)
-		handler func(c *Context) error
-		packet  = new(Packet)
+		buf    = make([]byte, 8000)
+		packet = new(Packet)
+		first  = true
 	)
-	context := &Context{
-		tcpConnection: conn,
-		connection:    c,
-	}
+
+	context := c.newContext()
 
 	for {
 		n, err := conn.Read(buf)
@@ -87,20 +85,30 @@ func (c *Connection) handler(conn net.Conn) {
 			c.replayString(conn, "REQUEST NOT ACCEPTTED", RejectAction)
 			return
 		}
+
+		logrus.Warn(packet)
 		context.request.Write(packet.Body)
 		h, ok := c.handlers[packet.Action]
 		if !ok {
 			c.replayString(conn, "COULD NOT FIND ACTION HANDLER", RejectAction)
 			break
 		}
-		handler = h
+
+		if first {
+			if err := h(context); err != nil {
+				logrus.Error()
+				return
+			}
+		}
+		first = false
+		if packet.Completed {
+			break
+		}
 	}
 
-	if err := handler(context); err != nil {
-		logrus.Error()
-		return
-	}
 	c.replay(conn, context.response, packet.Action)
+	logrus.Warn("socket closed")
+
 }
 
 func (c *Connection) replayString(conn net.Conn, message, action string) error {
@@ -124,6 +132,7 @@ func (c *Connection) replay(conn net.Conn, body io.Reader, action string) error 
 			Username:  "TODO",
 			PublicKey: "TODO",
 			Headers:   "TODO",
+			Completed: n < len(buf),
 			Body:      buf[:n],
 			Created:   time.Now().Unix(),
 		})
@@ -150,13 +159,13 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 		if err != nil {
 			break
 		}
-
 		packet, err := proto.Marshal(&Packet{
 			Action:    action,
 			Listener:  c.listner,
 			Username:  "TODO",
 			PublicKey: "TODO",
 			Headers:   "TODO",
+			Completed: n < len(buf),
 			Body:      buf[:n],
 			Created:   time.Now().Unix(),
 		})
@@ -169,5 +178,20 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 			return err
 		}
 	}
+
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			break
+		}
+
+		p := new(Packet)
+		if err := proto.Unmarshal(buf[:n], p); err != nil {
+			return err
+		}
+
+		logrus.Info(p)
+	}
+
 	return nil
 }

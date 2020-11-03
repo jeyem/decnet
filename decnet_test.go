@@ -3,15 +3,11 @@ package decnet
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"testing"
 	"time"
-
-	"github.com/dgraph-io/badger"
 )
 
-func TestDB(t *testing.T) {
+/* func TestDB(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	if err != nil {
 		panic(err)
@@ -45,7 +41,7 @@ func TestDB(t *testing.T) {
 
 	fmt.Println("set username -> ", c.Username, "   read username  -> ", com.Username)
 }
-
+*/
 func TestEcho(t *testing.T) {
 	const (
 		APort = 8000
@@ -63,6 +59,8 @@ func TestEcho(t *testing.T) {
 
 	go connA.Start()
 	go connB.Start()
+
+	time.Sleep(time.Second * 5)
 
 	reader := bytes.NewReader([]byte("hi"))
 	if err := connA.Send(fmt.Sprintf("0.0.0.0:%d", BPort), reader, "echo"); err != nil {
