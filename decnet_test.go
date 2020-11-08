@@ -3,6 +3,7 @@ package decnet
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"testing"
 	"time"
 )
@@ -54,13 +55,17 @@ func TestEcho(t *testing.T) {
 
 	connB, _ := New(Options{Port: BPort})
 	connB.AddHandler("echo", func(c *Context) error {
-		return c.Replay("Echo")
+		data, err := ioutil.ReadAll(c.Body())
+		if err != nil {
+			return err
+		}
+		return c.Replay(string(data))
 	})
 
 	go connA.Start()
 	go connB.Start()
 
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second)
 
 	reader := bytes.NewReader([]byte("hi"))
 	if err := connA.Send(fmt.Sprintf("0.0.0.0:%d", BPort), reader, "echo"); err != nil {
@@ -68,6 +73,6 @@ func TestEcho(t *testing.T) {
 		return
 	}
 
-	time.Sleep(time.Second * 20)
+	time.Sleep(time.Second * 5)
 
 }

@@ -8,10 +8,10 @@ import (
 )
 
 type compeer struct {
-	ID       string    `json:"id"`
-	Username string    `json:"username"`
-	Listener string    `json:"listener"`
-	Updated  time.Time `json:"updated"`
+	ID        string    `json:"id"`
+	PublicKey string    `json:"public_key`
+	Listener  string    `json:"listener"`
+	Updated   time.Time `json:"updated"`
 }
 
 func (c *compeer) save(txn *badger.Txn) error {

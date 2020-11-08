@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	TouchAction  = "Touch"
 	RejectAction = "Rejected"
 )
 
@@ -25,20 +26,20 @@ type Options struct {
 }
 
 type Connection struct {
-	listner  string
+	listner  int
 	db       *badger.DB
 	handlers map[string]HandlerFunc
 }
 
-func New(opt Options) (*Connection, error) {
+func New(opt Options, key *Key) (*Connection, error) {
 	conn := new(Connection)
 	conn.handlers = map[string]HandlerFunc{}
-	conn.listner = fmt.Sprintf("0.0.0.0:%d", opt.Port)
-	/* db, err := badger.Open(badger.DefaultOptions(opt.DBDir))
+	conn.listner = opt.Port
+	db, err := badger.Open(badger.DefaultOptions(opt.DBDir))
 	if err != nil {
 		return nil, err
 	}
-	conn.db = db */
+	conn.db = db
 	return conn, nil
 }
 
@@ -51,7 +52,7 @@ func (c *Connection) Start() {
 }
 
 func (c *Connection) tcpListener() {
-	ln, err := net.Listen("tcp", c.listner)
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", c.listner))
 	if err != nil {
 		logrus.Fatal(err)
 	}
@@ -67,46 +68,48 @@ func (c *Connection) tcpListener() {
 func (c *Connection) handler(conn net.Conn) {
 	defer conn.Close()
 
+	// txn := c.db.NewTransaction(true)
+
 	var (
 		buf    = make([]byte, 8000)
-		packet = new(Packet)
 		first  = true
+		action string
 	)
 
 	context := c.newContext()
-
+	context.tcpConnection = conn
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
 			break
 		}
-
+		packet := new(Packet)
 		if err := proto.Unmarshal(buf[:n], packet); err != nil {
 			c.replayString(conn, "REQUEST NOT ACCEPTTED", RejectAction)
 			return
 		}
 
-		logrus.Warn(packet)
+		packet.Action == TouchAction
+
 		context.request.Write(packet.Body)
 		h, ok := c.handlers[packet.Action]
 		if !ok {
 			c.replayString(conn, "COULD NOT FIND ACTION HANDLER", RejectAction)
 			break
 		}
-
 		if first {
 			if err := h(context); err != nil {
 				logrus.Error()
 				return
 			}
+			action = packet.Action
 		}
 		first = false
 		if packet.Completed {
 			break
 		}
 	}
-
-	c.replay(conn, context.response, packet.Action)
+	c.replay(conn, context.response, action)
 	logrus.Warn("socket closed")
 
 }
@@ -123,12 +126,9 @@ func (c *Connection) replay(conn net.Conn, body io.Reader, action string) error 
 		if err != nil {
 			break
 		}
-
-		logrus.Info(string(buf[:n]))
-
 		packet, err := proto.Marshal(&Packet{
-			Action:    action,
-			Listener:  c.listner,
+			Action:    action + "_replay",
+			Listener:  int32(c.listner),
 			Username:  "TODO",
 			PublicKey: "TODO",
 			Headers:   "TODO",
@@ -161,7 +161,7 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 		}
 		packet, err := proto.Marshal(&Packet{
 			Action:    action,
-			Listener:  c.listner,
+			Listener:  int32(c.listner),
 			Username:  "TODO",
 			PublicKey: "TODO",
 			Headers:   "TODO",
