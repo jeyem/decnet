@@ -2,9 +2,11 @@ package decnet
 
 import (
 	"bytes"
+	"crypto/rsa"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger"
@@ -22,20 +24,22 @@ type HandlerFunc func(c *Context) error
 type Options struct {
 	Port        int
 	StartPoints []string
-	DBDir       string
+	DBPath      string
 }
 
 type Connection struct {
 	listner  int
 	db       *badger.DB
 	handlers map[string]HandlerFunc
+	key      *Key
 }
 
 func New(opt Options, key *Key) (*Connection, error) {
 	conn := new(Connection)
 	conn.handlers = map[string]HandlerFunc{}
 	conn.listner = opt.Port
-	db, err := badger.Open(badger.DefaultOptions(opt.DBDir))
+	conn.key = key
+	db, err := badger.Open(badger.DefaultOptions(opt.DBPath))
 	if err != nil {
 		return nil, err
 	}
@@ -68,14 +72,15 @@ func (c *Connection) tcpListener() {
 func (c *Connection) handler(conn net.Conn) {
 	defer conn.Close()
 
-	// txn := c.db.NewTransaction(true)
+	txn := c.db.NewTransaction(true)
+	defer txn.Commit()
 
 	var (
 		buf    = make([]byte, 8000)
 		first  = true
 		action string
 	)
-
+	peer := new(compeer)
 	context := c.newContext()
 	context.tcpConnection = conn
 	for {
@@ -85,21 +90,32 @@ func (c *Connection) handler(conn net.Conn) {
 		}
 		packet := new(Packet)
 		if err := proto.Unmarshal(buf[:n], packet); err != nil {
-			c.replayString(conn, "REQUEST NOT ACCEPTTED", RejectAction)
+			c.sendString(conn, "REQUEST NOT ACCEPTTED", RejectAction, nil)
 			return
 		}
 
-		packet.Action == TouchAction
+		if packet.Action == TouchAction {
+			peer.ID = packet.Sender
+			peer.Listener = fmt.Sprintf("%s:%d", strings.Split(conn.RemoteAddr().String(), ":")[0], packet.Listener)
+			peer.PublicKey = string(packet.Body)
+			peer.save(txn)
+			c.sendString(conn, c.key.PublicKeyToPemString(), TouchAction, nil)
+		}
 
-		context.request.Write(packet.Body)
+		body, err := c.key.Decrypt(packet.Body)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		context.request.Write(body)
 		h, ok := c.handlers[packet.Action]
 		if !ok {
-			c.replayString(conn, "COULD NOT FIND ACTION HANDLER", RejectAction)
+			c.sendString(conn, "COULD NOT FIND ACTION HANDLER", RejectAction, nil)
 			break
 		}
 		if first {
 			if err := h(context); err != nil {
-				logrus.Error()
+				logrus.Error(err)
 				return
 			}
 			action = packet.Action
@@ -109,34 +125,25 @@ func (c *Connection) handler(conn net.Conn) {
 			break
 		}
 	}
-	c.replay(conn, context.response, action)
+	c.send(conn, context.response, action, peer.getPublicKey())
 	logrus.Warn("socket closed")
 
 }
 
-func (c *Connection) replayString(conn net.Conn, message, action string) error {
+func (c *Connection) sendString(conn net.Conn, message, action string, publicKey *rsa.PublicKey) error {
 	reader := bytes.NewReader([]byte(message))
-	return c.replay(conn, reader, action)
+	return c.send(conn, reader, action, publicKey)
 }
 
-func (c *Connection) replay(conn net.Conn, body io.Reader, action string) error {
+func (c *Connection) send(conn net.Conn, body io.Reader, action string, publicKey *rsa.PublicKey) error {
 	var buf = make([]byte, 6000)
 	for {
 		n, err := body.Read(buf)
 		if err != nil {
 			break
 		}
-		packet, err := proto.Marshal(&Packet{
-			Action:    action + "_replay",
-			Listener:  int32(c.listner),
-			Username:  "TODO",
-			PublicKey: "TODO",
-			Headers:   "TODO",
-			Completed: n < len(buf),
-			Body:      buf[:n],
-			Created:   time.Now().Unix(),
-		})
-
+		body, _ := Encrypt(publicKey, buf[:n])
+		packet, err := c.makePacket(action, body, n < len(buf))
 		if err != nil {
 			return err
 		}
@@ -154,29 +161,32 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 	if err != nil {
 		return err
 	}
-	for {
-		n, err := body.Read(buf)
-		if err != nil {
-			break
-		}
-		packet, err := proto.Marshal(&Packet{
-			Action:    action,
-			Listener:  int32(c.listner),
-			Username:  "TODO",
-			PublicKey: "TODO",
-			Headers:   "TODO",
-			Completed: n < len(buf),
-			Body:      buf[:n],
-			Created:   time.Now().Unix(),
-		})
 
-		if err != nil {
-			return err
-		}
+	if err := c.sendString(conn, c.key.PublicKeyToPemString(), TouchAction, nil); err != nil {
+		return err
+	}
 
-		if _, err := conn.Write(packet); err != nil {
-			return err
-		}
+	txn := c.db.NewTransaction(true)
+	defer txn.Commit()
+
+	n, err := conn.Read(buf)
+	if err != nil {
+		return err
+	}
+	packet := new(Packet)
+	if err := proto.Unmarshal(buf[:n], packet); err != nil {
+		c.sendString(conn, "REQUEST NOT ACCEPTTED", RejectAction, nil)
+		return err
+	}
+
+	peer := new(compeer)
+	peer.ID = packet.Sender
+	peer.Listener = fmt.Sprintf("%s:%d", strings.Split(conn.RemoteAddr().String(), ":")[0], packet.Listener)
+	peer.PublicKey = string(packet.Body)
+	peer.save(txn)
+
+	if err := c.send(conn, body, action, peer.getPublicKey()); err != nil {
+		return err
 	}
 
 	for {
@@ -194,4 +204,15 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 	}
 
 	return nil
+}
+
+func (c *Connection) makePacket(action string, content []byte, completed bool, headers ...string) ([]byte, error) {
+	return proto.Marshal(&Packet{
+		Action:    action,
+		Listener:  int32(c.listner),
+		Headers:   headers,
+		Completed: completed,
+		Body:      content,
+		Created:   time.Now().Unix(),
+	})
 }

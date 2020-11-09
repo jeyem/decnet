@@ -5,8 +5,6 @@ package decnet;
 message packet {
   string Action           = 1;
   int32 Listener          = 2;
-  string Username         = 3;
-  string PublicKey        = 4;
   repeated string Headers = 5;
   string sender           = 6;
   bool completed          = 7;

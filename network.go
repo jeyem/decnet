@@ -1,6 +1,7 @@
 package decnet
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"time"
 
@@ -21,6 +22,11 @@ func (c *compeer) save(txn *badger.Txn) error {
 		return err
 	}
 	return txn.Set([]byte(c.Listener), data)
+}
+
+func (c *compeer) getPublicKey() *rsa.PublicKey {
+	k, _ := convertBytesToPublicKey([]byte(c.PublicKey))
+	return k
 }
 
 func findPeer(key string, txn *badger.Txn) (*compeer, error) {

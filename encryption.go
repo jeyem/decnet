@@ -49,9 +49,9 @@ func (k Key) PrivateKeyToPemString() string {
 	)
 }
 
-func (k *Key) Decrypt(encryptedMessage string) (string, error) {
+func (k *Key) Decrypt(encryptedMessage []byte) ([]byte, error) {
 
-	plainMessage, err := rsa.DecryptOAEP(
+	return rsa.DecryptOAEP(
 		sha512.New(),
 		rand.Reader,
 		k.privateKey,
@@ -59,25 +59,21 @@ func (k *Key) Decrypt(encryptedMessage string) (string, error) {
 		nil,
 	)
 
-	return string(plainMessage), err
 }
 
-func Encrypt(key, plainText string) (string, error) {
-	publicKey, err := convertBytesToPublicKey([]byte(key))
-	if err != nil {
-		return "", err
+func Encrypt(publicKey *rsa.PublicKey, plainText []byte) ([]byte, error) {
+	if publicKey == nil {
+		return plainText, nil
 	}
-	cipher, err := rsa.EncryptOAEP(sha512.New(), rand.Reader, publicKey, []byte(plainText), nil)
+	cipher, err := rsa.EncryptOAEP(sha512.New(), rand.Reader, publicKey, plainText, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
 	return cipherToPemString(cipher), nil
 }
 
-func pemStringToCipher(encryptedMessage string) []byte {
-	b, _ := pem.Decode([]byte(encryptedMessage))
-
+func pemStringToCipher(encryptedMessage []byte) []byte {
+	b, _ := pem.Decode(encryptedMessage)
 	return b.Bytes
 }
 
@@ -103,13 +99,11 @@ func convertBytesToPublicKey(keyBytes []byte) (*rsa.PublicKey, error) {
 	return publicKey, nil
 }
 
-func cipherToPemString(cipher []byte) string {
-	return string(
-		pem.EncodeToMemory(
-			&pem.Block{
-				Type:  "MESSAGE",
-				Bytes: cipher,
-			},
-		),
+func cipherToPemString(cipher []byte) []byte {
+	return pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "MESSAGE",
+			Bytes: cipher,
+		},
 	)
 }

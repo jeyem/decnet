@@ -48,12 +48,30 @@ func TestEcho(t *testing.T) {
 		APort = 8000
 		BPort = 8001
 	)
-	connA, _ := New(Options{Port: APort})
+	keyA, err := GenerateKey()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	keyB, err := GenerateKey()
+	t.Error(err)
+	if err != nil {
+		return
+	}
+	connA, err := New(Options{Port: APort, DBPath: "decnet_test_conn_a.db"}, keyA)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	connA.AddHandler("echo", func(c *Context) error {
 		return c.Replay("Echo")
 	})
 
-	connB, _ := New(Options{Port: BPort})
+	connB, err := New(Options{Port: BPort, DBPath: "decnet_test_conn_b.db"}, keyB)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 	connB.AddHandler("echo", func(c *Context) error {
 		data, err := ioutil.ReadAll(c.Body())
 		if err != nil {
