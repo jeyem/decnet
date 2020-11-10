@@ -14,12 +14,13 @@ type Context struct {
 	request        *bufio.Buffer
 	response       *bufio.Buffer
 	tcpConnection  net.Conn
+	conn           *Connection
 	sync.Mutex
 }
 
 func (c *Connection) newContext() *Context {
 	ctx := new(Context)
-
+	ctx.conn = c
 	ctx.request = bufio.NewBuffer(ctx.requestBuffer)
 	ctx.response = bufio.NewBuffer(ctx.responseBuffer)
 

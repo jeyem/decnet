@@ -48,7 +48,14 @@ func New(opt Options, key *Key) (*Connection, error) {
 }
 
 func (c *Connection) AddHandler(action string, handler HandlerFunc) {
+	if action == TouchAction || action == RejectAction {
+		logrus.Fatalf("could not use %s action", action)
+	}
 	c.handlers[action] = handler
+}
+
+func (c *Connection) AddReplayHandler(action string, handler HandlerFunc) {
+	c.AddHandler(action+"_replay", handler)
 }
 
 func (c *Connection) Start() {
@@ -93,15 +100,14 @@ func (c *Connection) handler(conn net.Conn) {
 			c.sendString(conn, "REQUEST NOT ACCEPTTED", RejectAction, nil)
 			return
 		}
-
 		if packet.Action == TouchAction {
 			peer.ID = packet.Sender
 			peer.Listener = fmt.Sprintf("%s:%d", strings.Split(conn.RemoteAddr().String(), ":")[0], packet.Listener)
 			peer.PublicKey = string(packet.Body)
 			peer.save(txn)
 			c.sendString(conn, c.key.PublicKeyToPemString(), TouchAction, nil)
+			continue
 		}
-
 		body, err := c.key.Decrypt(packet.Body)
 		if err != nil {
 			logrus.Error(err)
@@ -125,9 +131,7 @@ func (c *Connection) handler(conn net.Conn) {
 			break
 		}
 	}
-	c.send(conn, context.response, action, peer.getPublicKey())
-	logrus.Warn("socket closed")
-
+	c.send(conn, context.response, action+"_replay", peer.getPublicKey())
 }
 
 func (c *Connection) sendString(conn net.Conn, message, action string, publicKey *rsa.PublicKey) error {
@@ -142,8 +146,8 @@ func (c *Connection) send(conn net.Conn, body io.Reader, action string, publicKe
 		if err != nil {
 			break
 		}
-		body, _ := Encrypt(publicKey, buf[:n])
-		packet, err := c.makePacket(action, body, n < len(buf))
+		data, _ := Encrypt(publicKey, buf[:n])
+		packet, err := c.makePacket(action, data, n < len(buf))
 		if err != nil {
 			return err
 		}
@@ -189,6 +193,8 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 		return err
 	}
 
+	first := true
+	context := c.newContext()
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -199,10 +205,24 @@ func (c *Connection) Send(listener string, body io.Reader, action string) error 
 		if err := proto.Unmarshal(buf[:n], p); err != nil {
 			return err
 		}
-
-		logrus.Info(p)
+		body, err := c.key.Decrypt(p.Body)
+		if err != nil {
+			logrus.Error(err)
+			continue
+		}
+		context.request.Write(body)
+		h, ok := c.handlers[p.Action]
+		if !ok {
+			break
+		}
+		if first {
+			if err := h(context); err != nil {
+				return err
+			}
+			action = packet.Action
+		}
+		first = false
 	}
-
 	return nil
 }
 
