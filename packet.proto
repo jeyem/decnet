@@ -3,12 +3,11 @@ package decnet;
 
 
 message packet {
-  string Action     = 1;
-  string Listener   = 2;
-  string Username   = 3;
-  string PublicKey  = 4;
-  string Headers    = 5;
-  bool completed    = 6;
-  bytes Body        = 7;
-  int64 created     = 8;
+  string Action           = 1;
+  int32 Listener          = 2;
+  repeated string Headers = 5;
+  string sender           = 6;
+  bool completed          = 7;
+  bytes Body              = 8;
+  int64 created           = 9;
 }
